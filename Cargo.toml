@@ -1,0 +1,16 @@
+[package]
+name = "worklog"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4.19"
+chrono-english = "0.1.7"
+color-eyre = "0.6.1"
+diesel = { version = "1.4.8", features = ["sqlite", "chrono"] }
+diesel_migrations = "1.4.0"
+dirs = "4.0.0"
+structopt = { version = "0.3.26", features = ["suggestions"] }
+supports-hyperlinks = "1.2.0"
+terminal-link = "0.1.0"
+thiserror = "1.0.31"
