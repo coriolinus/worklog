@@ -14,6 +14,7 @@ Ever had the sinking feeling, at a standup or a sprint review, of "What the hell
 - What did you do yesterday: `worklog report yesterday`. Lists all tasks started yesterday, ordered by start time.
 - What did you do on a particular day: `worklog report for Monday`. Lists all tasks started on Monday, ordered by start time.
 - How much time did you spend on each task yesterday: `worklog report --time-tracking yesterday`. Lists all tasks worked on yesterday, ordered by duration of work.
+- What did you do over the span of several days: `worklog report span "two Mondays ago" "now"`. Lists all tasks worked on from two Mondays ago until now.
 
 ## Model
 
