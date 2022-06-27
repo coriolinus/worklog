@@ -1,0 +1,14 @@
+use super::{Cli, BareMessage, RelativeMessage, AbsoluteMessage};
+use chrono::{DateTime, Utc};
+use chrono_english::{parse_duration, parse_date_string, Dialect};
+
+grammar;
+
+Message: String = <r".*"> => <>.to_string();
+TimeSpec: &str = <r"[^:]+"> => <>;
+Interval: chrono_english::Interval = <TimeSpec> "ago"? => parse_duration(<>).expect("duration could be parsed");
+DateTime: DateTime<Utc> = <TimeSpec> => parse_date_string(<>).expect("date string could be parsed");
+
+pub BareMessage: BareMessage = <message:Message> => BareMessage { message };
+pub RelativeMessage: RelativeMessage = <interval:Interval> ":" <message:Message> => RelativeMessage { interval, message };
+pub AbsoluteMessage: AbsoluteMessage = <timestamp:DateTime> ":" <message:Message> => AbsoluteMessage { timestamp, message };

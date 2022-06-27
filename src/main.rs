@@ -1,36 +1,19 @@
-use structopt::StructOpt;
+#[macro_use]
+extern crate lalrpop_util;
 
-#[derive(Debug, StructOpt)]
-struct Options {
-    #[structopt(subcommand)]
-    subcommand: Subcommand,
-}
-
-#[derive(Debug, StructOpt)]
-enum Subcommand {
-    Paths {
-        #[structopt(subcommand)]
-        which: PathSubcommand,
-    },
-}
-
-#[derive(Debug, StructOpt)]
-enum PathSubcommand {
-    Database,
-    Config,
-}
+mod cli;
 
 fn main() -> color_eyre::eyre::Result<()> {
     color_eyre::install()?;
 
-    let opts = Options::from_args();
+    let opts = Cli::parse();
     match opts.subcommand {
-        Subcommand::Paths {
+        Command::Paths {
             which: PathSubcommand::Config,
         } => {
             println!("{}", worklog::paths::config().display());
         }
-        Subcommand::Paths {
+        Command::Paths {
             which: PathSubcommand::Database,
         } => {
             println!("{}", worklog::paths::database().display());
