@@ -1,32 +1,36 @@
-// this special rule is silent, but run implicitly and repeatedly at each join
-WHITESPACE = _{ " " | "\t" }
+// we are intentionally _not_ using the magic WHITESPACE rule here;
+// we mostly care about whitespace actually
+ws = _{ " " | "\t" }
+// space is at least one whitespace char
+space = _{ ws+ }
 
 // some basic components:
 // ---------------------
 // time tracking flag isn't part of other messages
 time_tracking = { "--time-tracking" | "--tt" }
 // messages are essentially anything which fits on a single line
-message = { (LETTER | NUMBER | PUNCTUATION | WHITESPACE)* }
+message_char = _{ LETTER | NUMBER | PUNCTUATION | ws }
+message = { message_char* }
 // time specs can't contain colons
-time_spec = { !(":" | time_tracking) ~ message }
+time_spec = { (!(":" | "ago" | time_tracking) ~ message_char)* }
 // interval might end with "ago"
-interval = { time_spec ~ "ago" }
+interval = _{ time_spec ~ "ago"? }
 
 // now build up a few higher-level constructs
 bare_message = { message }
-relative_message = { interval ~ ":" ~ message }
-absolute_message = { time_spec ~ ":" ~ message }
+relative_message = { interval ~ (":" ~ ws* ~ message)? }
+absolute_message = { time_spec ~ ":" ~ ws* ~ message }
 
 // now the parsers for each CLI variant
 // note the explicit whitespace; we want at least one space after the keyword
-start = { "start" ~ WHITESPACE ~ message }
-stop = { "stop" ~ WHITESPACE ~ message }
-started = { "started" ~ WHITESPACE ~ relative_message }
-stopped = { "stopped" ~ WHITESPACE ~ relative_message }
-started_at = { "started at" ~ WHITESPACE ~ absolute_message }
-stopped_at = { "stopped at" ~ WHITESPACE ~ absolute_message }
-report = { "report" ~ (WHITESPACE ~ interval)? ~ time_tracking? }
-report_for = { "report for" ~ WHITESPACE ~ time_spec ~ time_tracking? }
+start = { "start" ~ (space ~ message)? }
+stop = { "stop" ~ (space ~ message)? }
+started = { "started" ~ (space ~ relative_message?) }
+stopped = { "stopped" ~ (space ~ relative_message)? }
+started_at = { "started at" ~ (space ~ absolute_message)? }
+stopped_at = { "stopped at" ~ (space ~ absolute_message)? }
+report = { "report" ~ (space ~ interval)? ~ (space ~ time_tracking)? }
+report_for = { "report for" ~ space ~ time_spec ~ time_tracking? }
 
 // now the actual top-level parser
 cli_parser = {
