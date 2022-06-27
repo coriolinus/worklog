@@ -1,0 +1,45 @@
+// this special rule is silent, but run implicitly and repeatedly at each join
+WHITESPACE = _{ " " | "\t" }
+
+// some basic components:
+// ---------------------
+// time tracking flag isn't part of other messages
+time_tracking = { "--time-tracking" | "--tt" }
+// messages are essentially anything which fits on a single line
+message = { (LETTER | NUMBER | PUNCTUATION | WHITESPACE)* }
+// time specs can't contain colons
+time_spec = { !(":" | time_tracking) ~ message }
+// interval might end with "ago"
+interval = { time_spec ~ "ago" }
+
+// now build up a few higher-level constructs
+bare_message = { message }
+relative_message = { interval ~ ":" ~ message }
+absolute_message = { time_spec ~ ":" ~ message }
+
+// now the parsers for each CLI variant
+// note the explicit whitespace; we want at least one space after the keyword
+start = { "start" ~ WHITESPACE ~ message }
+stop = { "stop" ~ WHITESPACE ~ message }
+started = { "started" ~ WHITESPACE ~ relative_message }
+stopped = { "stopped" ~ WHITESPACE ~ relative_message }
+started_at = { "started at" ~ WHITESPACE ~ absolute_message }
+stopped_at = { "stopped at" ~ WHITESPACE ~ absolute_message }
+report = { "report" ~ (WHITESPACE ~ interval)? ~ time_tracking? }
+report_for = { "report for" ~ WHITESPACE ~ time_spec ~ time_tracking? }
+
+// now the actual top-level parser
+cli_parser = {
+    SOI ~
+    (
+        started_at |
+        started |
+        start |
+        stopped_at |
+        stopped |
+        stop |
+        report_for |
+        report
+    ) ~
+    EOI
+}
