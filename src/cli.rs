@@ -2,13 +2,16 @@
 //!
 //! We're rolling our own CLI parsing here instead of using `structopt` or `clap` because this is a very informal,
 //! pseudo-natural-language CLI which is heavy on subcommands and strings and light on parsed data.
-//!
-//! Note that we're using Pest's idiomaticity guidelines which specify that we should make heavy use of
-//! `unwrap` and `unreachable` based on the parser definitions; it's not a good feeling so far, but we'll see how it goes.
+//
+// Any chance it gives me to explore a bunch of parser libraries is a purely incidental benefit.
 
 use chrono::{DateTime, Local};
 use chrono_english::{Dialect, Interval};
 use peg::{error::ParseError, str::LineCol};
+
+fn no_start_message(require_message: bool, msg: &Option<String>) -> bool {
+    require_message && (msg.is_none() || msg.as_ref().map(|msg| msg.is_empty()).unwrap_or_default())
+}
 
 peg::parser! {
     grammar cli_parser() for str {
@@ -32,82 +35,102 @@ peg::parser! {
             = quiet!{ts:$((!(":" / "ago" / time_tracking()) [' '..='~'])*) { ts.trim() }}
             / expected!("time_spec")
         // interval might end with "ago"
-        rule interval() -> Interval
-            = ts:time_spec() "ago"? {?
-                chrono_english::parse_duration(ts).or(Err("interval"))
+        rule interval() -> Result<Interval, Error>
+            = ts:time_spec() "ago"? {
+                chrono_english::parse_duration(ts).map_err(|err| Error::ParseInterval(ts.into(), err))
             }
-        rule datetime() -> DateTime<Local>
-            = ts:time_spec() {?
-                chrono_english::parse_date_string(ts, Local::now(), Dialect::Us).or(Err("date"))
+        rule datetime() -> Result<DateTime<Local>, Error>
+            = ts:time_spec() {
+                chrono_english::parse_date_string(ts, Local::now(), Dialect::Us)
+                    .map_err(|err| Error::ParseDatetime(ts.into(), err))
         }
 
         // now build up a few higher-level constructs
-        rule bare_message() -> BareMessage
-            = message:message() { BareMessage { message } }
+        rule bare_message(require_message: bool) -> Result<BareMessage, Error>
+            = msg:message()? {
+                if no_start_message(require_message, &msg) {
+                    Err(Error::NoStartMessage)
+                } else {
+                    let message = msg.unwrap_or_default();
+                    Ok(BareMessage { message })
+                }
+             }
         rule colon_message() -> String
             = ":" ws()* message:message() { message }
-        rule relative_message(require_message: bool) -> RelativeMessage
-            = interval:interval() msg:colon_message()? {?
-                if require_message && msg.is_none() {
-                    Err("message was required but not present")
+        rule relative_message(require_message: bool) -> Result<RelativeMessage, Error>
+            = interval:interval() msg:colon_message()? {
+                let interval = interval?;
+
+                if no_start_message(require_message, &msg) {
+                    Err(Error::NoStartMessage)
                 } else {
-                    Ok(RelativeMessage { interval, message: msg.unwrap_or_default() })
+                    let message = msg.unwrap_or_default();
+                    Ok(RelativeMessage { interval, message })
                 }
             }
-        rule absolute_message(require_message: bool) -> AbsoluteMessage
-            = timestamp:datetime() msg:colon_message()? {?
-                if require_message && msg.is_none() {
-                    Err("message was required but not present")
+        rule absolute_message(require_message: bool) -> Result<AbsoluteMessage, Error>
+            = timestamp:datetime() msg:colon_message()? {
+                let timestamp = timestamp?;
+
+                if no_start_message(require_message, &msg) {
+                    Err(Error::NoStartMessage)
                 } else {
-                    Ok(AbsoluteMessage { timestamp, message: msg.unwrap_or_default() })
+                    let message = msg.unwrap_or_default();
+                    Ok(AbsoluteMessage { timestamp, message })
                 }
             }
 
         // now the parsers for each CLI variant
         // note the explicit whitespace; we want at least one space after the keyword
-        rule start() -> Cli
-            = "start" m:space_then(<bare_message()>) {
-                Cli::Start(m)
+        rule start() -> Result<Cli, Error>
+            = "start" m:bare_message(true) {
+                Ok(Cli::Start(m?))
             }
-        rule stop() -> Cli
-            = "stop" m:space_then(<bare_message()>)? {
-                Cli::Stop(m.unwrap_or_default())
+        rule stop() -> Result<Cli, Error>
+            = "stop" m:bare_message(false) {
+                Ok(Cli::Stop(m?))
             }
-        rule started() -> Cli
+        rule started() -> Result<Cli, Error>
             = "started" m:space_then(<relative_message(true)>) {
-                Cli::Started(m)
+                Ok(Cli::Started(m?))
             }
-        rule stopped() -> Cli
+        rule stopped() -> Result<Cli, Error>
             = "stopped" m:space_then(<relative_message(false)>) {
-                Cli::Stopped(m)
+                Ok(Cli::Stopped(m?))
             }
-        rule started_at() -> Cli
+        rule started_at() -> Result<Cli, Error>
             = "started at" m:space_then(<absolute_message(true)>) {
-                Cli::StartedAt(m)
+                Ok(Cli::StartedAt(m?))
             }
-        rule stopped_at() -> Cli
+        rule stopped_at() -> Result<Cli, Error>
             = "stopped at" m:space_then(<absolute_message(false)>) {
-                Cli::StoppedAt(m)
+                Ok(Cli::StoppedAt(m?))
             }
+        rule catch_command() -> Result<Cli, Error>
+            = quiet!{cmd:$((!ws() [' '..='~'])+) message() {
+                Err(Error::UnknownCommand(cmd.trim().to_owned()))
+            }}
 
         // TODO later
         // report = { "report" ~ (space ~ interval)? ~ (space ~ time_tracking)? }
         // report_for = { "report for" ~ space ~ time_spec ~ time_tracking? }
 
         // now the actual top-level parser
-        pub rule cli() -> Cli
+        pub rule cli() -> Result<Cli, Error>
             = c:(
                 started_at() /
                 started() /
                 start() /
                 stopped_at() /
                 stopped() /
-                stop()
+                stop() /
+                // note: this catchall should always be last in the command list
+                catch_command()
             ) { c }
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BareMessage {
     message: String,
 }
@@ -167,14 +190,24 @@ pub enum Cli {
 
 impl Cli {
     fn parse(input: &str) -> Result<Self, Error> {
-        cli_parser::cli(input).map_err(Into::into)
+        cli_parser::cli(input)
+            .or_else(|err| Err(Error::UnexpectedParseError(err)))
+            .and_then(std::convert::identity)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("parse error")]
-    Peg(#[from] ParseError<LineCol>),
+    #[error("parsing human interval from \"{0}\"")]
+    ParseInterval(String, #[source] chrono_english::DateError),
+    #[error("parsing human absolute timestamp from \"{0}\"")]
+    ParseDatetime(String, #[source] chrono_english::DateError),
+    #[error("message is required for start variants")]
+    NoStartMessage,
+    #[error("unknown command: \"{0}\"")]
+    UnknownCommand(String),
+    #[error("unexpected parse error")]
+    UnexpectedParseError(#[source] ParseError<LineCol>),
 }
 
 impl PartialEq for Error {
@@ -195,13 +228,15 @@ mod example_tests {
 
     macro_rules! expect_bad {
         ($msg:expr => $pattern:pat_param) => {
-            assert!(matches!(Cli::parse($msg).unwrap_err(), $pattern))
+            let err = Cli::parse($msg).unwrap_err();
+            dbg!(&err);
+            assert!(matches!(err, $pattern))
         };
     }
 
     #[test]
     fn glorb() {
-        expect_bad!("glorb" => Error::Peg(_));
+        expect_bad!("glorb" => Error::UnknownCommand(_));
     }
 
     #[test]
@@ -211,7 +246,7 @@ mod example_tests {
 
     #[test]
     fn bare_start() {
-        expect_bad!("start" => Error::Peg(_));
+        expect_bad!("start" => Error::NoStartMessage);
     }
 
     #[test]
@@ -234,7 +269,7 @@ mod example_tests {
 
     #[test]
     fn started_15m_ago() {
-        expect_bad!("started 15m ago" => Error::Peg(_));
+        expect_bad!("started 15m ago" => Error::NoStartMessage);
     }
 
     #[test]
