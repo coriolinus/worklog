@@ -23,14 +23,14 @@ absolute_message = { time_spec ~ ":" ~ ws* ~ message }
 
 // now the parsers for each CLI variant
 // note the explicit whitespace; we want at least one space after the keyword
-start = { "start" ~ (space ~ message)? }
-stop = { "stop" ~ (space ~ message)? }
+start = { "start" ~ (space ~ bare_message)? }
+stop = { "stop" ~ (space ~ bare_message)? }
 started = { "started" ~ (space ~ relative_message?) }
 stopped = { "stopped" ~ (space ~ relative_message)? }
 started_at = { "started at" ~ (space ~ absolute_message)? }
 stopped_at = { "stopped at" ~ (space ~ absolute_message)? }
-report = { "report" ~ (space ~ interval)? ~ (space ~ time_tracking)? }
-report_for = { "report for" ~ space ~ time_spec ~ time_tracking? }
+// report = { "report" ~ (space ~ interval)? ~ (space ~ time_tracking)? }
+// report_for = { "report for" ~ space ~ time_spec ~ time_tracking? }
 
 // now the actual top-level parser
 cli_parser = {
@@ -42,8 +42,8 @@ cli_parser = {
         stopped_at |
         stopped |
         stop |
-        report_for |
-        report
+        // report_for |
+        // report
     ) ~
     EOI
 }

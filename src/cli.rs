@@ -6,26 +6,98 @@
 //! Note that we're using Pest's idiomaticity guidelines which specify that we should make heavy use of
 //! `unwrap` and `unreachable` based on the parser definitions; it's not a good feeling so far, but we'll see how it goes.
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use chrono_english::Interval;
-use pest::{iterators::Pair, Parser};
+use pest_consume::{match_nodes, Parser};
 
-#[derive(pest_derive::Parser)]
+type Rule = <CliParser as Parser>::Rule;
+type Node<'i> = pest_consume::Node<'i, Rule, ()>;
+
+#[derive(Parser)]
 #[grammar = "cli_parser.pest"]
 pub struct CliParser;
 
-trait HasMessage {
-    fn message(&self) -> &str;
+#[pest_consume::parser]
+impl CliParser {
+    fn time_tracking(input: Node) -> Result<(), pest_consume::Error<Rule>> {
+        Ok(())
+    }
+    fn message(input: Node) -> Result<String, pest_consume::Error<Rule>> {
+        Ok(input.as_str().to_owned())
+    }
+    fn time_spec(input: Node) -> Result<&str, pest_consume::Error<Rule>> {
+        Ok(input.as_str())
+    }
+    fn bare_message(input: Node) -> Result<BareMessage, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [message(message)] => BareMessage { message }
+        ))
+    }
+    fn relative_message(input: Node) -> Result<RelativeMessage, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [time_spec(interval), message(message)] => {
+                let interval = chrono_english::parse_duration(interval).map_err(|e| input.error(e))?;
+                RelativeMessage { interval, message }
+            }
+        ))
+    }
+    fn absolute_message(input: Node) -> Result<AbsoluteMessage, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [time_spec(timestamp), message(message)] => {
+                let timestamp = chrono_english::parse_date_string(
+                    timestamp,
+                    Utc::now(),
+                    chrono_english::Dialect::Us,
+                ).map_err(|e| input.error(e))?;
+                AbsoluteMessage { timestamp, message }
+            }
+        ))
+    }
+    fn start(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [bare_message(message)] => Cli::Start(message)
+        ))
+    }
+    fn stop(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [bare_message(message)] => Cli::Stop(message)
+        ))
+    }
+    fn started(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [relative_message(message)] => Cli::Started(message)
+        ))
+    }
+    fn stopped(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [relative_message(message)] => Cli::Stopped(message)
+        ))
+    }
+    fn started_at(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [absolute_message(message)] => Cli::StartedAt(message)
+        ))
+    }
+    fn stopped_at(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        Ok(match_nodes!(input.into_children();
+            [absolute_message(message)] => Cli::StoppedAt(message)
+        ))
+    }
+    // fn report(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+    //     Ok(match_nodes!(input.into_children();
+    //         [absolute_message(message)] => Cli::StartedAt(message)
+    //     ))
+    // }
+    // fn report_for(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+    //     Ok(match_nodes!(input.into_children();
+    //         [] => {
+    //             let yesterday = Local::today().naive_local() - Duration::days(1);
 
-    fn ensure_message<E>(self, or: E) -> Result<Self, E>
-    where
-        Self: Sized,
-    {
-        if self.message().is_empty() {
-            Err(or)
-        } else {
-            Ok(self)
-        }
+    //         }
+    //     ))
+    // }
+    fn cli_parser(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
+        todo!()
     }
 }
 
@@ -39,23 +111,6 @@ impl BareMessage {
     fn new(message: &str) -> Self {
         let message = message.to_string();
         Self { message }
-    }
-
-    /// This is only safe within a context where you already know that cli is _definitely_
-    /// a container for a `Self`.
-    fn parse(cli: Pair<Rule>) -> Self {
-        let message = cli
-            .into_inner()
-            .next()
-            .map(|msg_pair| msg_pair.as_str().to_string())
-            .unwrap_or_default();
-        Self { message }
-    }
-}
-
-impl HasMessage for BareMessage {
-    fn message(&self) -> &str {
-        &self.message
     }
 }
 
@@ -72,49 +127,12 @@ impl RelativeMessage {
         let message = message.to_string();
         Self { interval, message }
     }
-
-    /// This is only safe within a context where you already know that cli is _definitely_
-    /// a container for a `Self`.
-    fn parse(cli: Pair<Rule>) -> Result<Self, Error> {
-        let mut relative_message = cli
-            .into_inner()
-            .next()
-            .expect("1/1 guaranteed matches for started")
-            .into_inner();
-
-        let time_spec = relative_message
-            .next()
-            .expect("1/2 guaranteed inners of relative_message")
-            .as_str();
-
-        let interval = chrono_english::parse_duration(time_spec)
-            .map_err(|err| Error::ParseInterval(time_spec.to_string(), err))?;
-
-        let message = relative_message
-            .next()
-            .map(|message_node| message_node.as_str().to_string())
-            .unwrap_or_default();
-
-        Ok(RelativeMessage { interval, message })
-    }
-}
-
-impl HasMessage for RelativeMessage {
-    fn message(&self) -> &str {
-        &self.message
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AbsoluteMessage {
     timestamp: DateTime<Utc>,
     message: String,
-}
-
-impl HasMessage for AbsoluteMessage {
-    fn message(&self) -> &str {
-        &self.message
-    }
 }
 
 /// This struct represents user input via the CLI.
@@ -143,43 +161,9 @@ pub enum Cli {
 
 impl Cli {
     fn parse(input: &str) -> Result<Self, Error> {
-        use pest::iterators::Pair;
-
-        let cli = CliParser::parse(Rule::cli_parser, input)?
-            .next()
-            .expect("1/1 guaranteed matches for CliParser outer")
-            .into_inner()
-            .next()
-            .expect("1/1 guaranteed matches for CliParser inner");
-
-        Ok(match cli.as_rule() {
-            Rule::start => {
-                Cli::Start(BareMessage::parse(cli).ensure_message(Error::NoStartMessage)?)
-            }
-            Rule::stop => Cli::Stop(BareMessage::parse(cli)),
-            Rule::started => {
-                Cli::Started(RelativeMessage::parse(cli)?.ensure_message(Error::NoStartMessage)?)
-            }
-            Rule::stopped => Cli::Stopped(RelativeMessage::parse(cli)?),
-            Rule::started_at => todo!(),
-            Rule::stopped_at => todo!(),
-            Rule::report => todo!(),
-            Rule::report_for => todo!(),
-            Rule::EOI
-            | Rule::ws
-            | Rule::space
-            | Rule::cli_parser
-            | Rule::time_tracking
-            | Rule::message_char
-            | Rule::message
-            | Rule::time_spec
-            | Rule::interval
-            | Rule::bare_message
-            | Rule::relative_message
-            | Rule::absolute_message => {
-                unreachable!("cannot arrive at these rules from the top-level cli")
-            }
-        })
+        let inputs = CliParser::parse(Rule::cli_parser, input)?;
+        let input = inputs.single()?;
+        CliParser::cli_parser(input)
     }
 }
 
