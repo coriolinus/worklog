@@ -6,102 +6,108 @@
 //! Note that we're using Pest's idiomaticity guidelines which specify that we should make heavy use of
 //! `unwrap` and `unreachable` based on the parser definitions; it's not a good feeling so far, but we'll see how it goes.
 
-use chrono::{DateTime, Utc};
-use chrono_english::Interval;
-use pest_consume::{match_nodes, Parser};
+use chrono::{DateTime, Local};
+use chrono_english::{Dialect, Interval};
+use peg::{error::ParseError, str::LineCol};
 
-type Rule = <CliParser as Parser>::Rule;
-type Node<'i> = pest_consume::Node<'i, Rule, ()>;
+peg::parser! {
+    grammar cli_parser() for str {
+        rule ws() = quiet!{[' ' | '\t']}
+        rule space() = quiet!{ws()+}
+        rule space_then<T>(r: rule<T>) -> T
+            = quiet!{space() r:r() { r }}
 
-#[derive(Parser)]
-#[grammar = "cli_parser.pest"]
-pub struct CliParser;
-
-#[pest_consume::parser]
-impl CliParser {
-    fn time_tracking(input: Node) -> Result<(), pest_consume::Error<Rule>> {
-        Ok(())
-    }
-    fn message(input: Node) -> Result<String, pest_consume::Error<Rule>> {
-        Ok(input.as_str().to_owned())
-    }
-    fn time_spec(input: Node) -> Result<&str, pest_consume::Error<Rule>> {
-        Ok(input.as_str())
-    }
-    fn bare_message(input: Node) -> Result<BareMessage, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [message(message)] => BareMessage { message }
-        ))
-    }
-    fn relative_message(input: Node) -> Result<RelativeMessage, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [time_spec(interval), message(message)] => {
-                let interval = chrono_english::parse_duration(interval).map_err(|e| input.error(e))?;
-                RelativeMessage { interval, message }
+        // some basic components:
+        // ---------------------
+        // time tracking flag isn't part of other messages
+        rule time_tracking() -> ()
+            = "--time-tracking" / "--tt" { () }
+        // messages are essentially anything which fits on a single line
+        // turns out that in ASCII, you can express this as the single range below
+        rule message() -> String
+            = quiet!{msg:$([' '..='~']*) { msg.trim().to_owned() }}
+            / expected!("message")
+        // time specs can't contain colons
+        rule time_spec() -> &'input str
+            = quiet!{ts:$((!(":" / "ago" / time_tracking()) [' '..='~'])*) { ts.trim() }}
+            / expected!("time_spec")
+        // interval might end with "ago"
+        rule interval() -> Interval
+            = ts:time_spec() "ago"? {?
+                chrono_english::parse_duration(ts).or(Err("interval"))
             }
-        ))
-    }
-    fn absolute_message(input: Node) -> Result<AbsoluteMessage, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [time_spec(timestamp), message(message)] => {
-                let timestamp = chrono_english::parse_date_string(
-                    timestamp,
-                    Utc::now(),
-                    chrono_english::Dialect::Us,
-                ).map_err(|e| input.error(e))?;
-                AbsoluteMessage { timestamp, message }
-            }
-        ))
-    }
-    fn start(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [bare_message(message)] => Cli::Start(message)
-        ))
-    }
-    fn stop(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [bare_message(message)] => Cli::Stop(message)
-        ))
-    }
-    fn started(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [relative_message(message)] => Cli::Started(message)
-        ))
-    }
-    fn stopped(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [relative_message(message)] => Cli::Stopped(message)
-        ))
-    }
-    fn started_at(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [absolute_message(message)] => Cli::StartedAt(message)
-        ))
-    }
-    fn stopped_at(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        Ok(match_nodes!(input.into_children();
-            [absolute_message(message)] => Cli::StoppedAt(message)
-        ))
-    }
-    // fn report(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-    //     Ok(match_nodes!(input.into_children();
-    //         [absolute_message(message)] => Cli::StartedAt(message)
-    //     ))
-    // }
-    // fn report_for(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-    //     Ok(match_nodes!(input.into_children();
-    //         [] => {
-    //             let yesterday = Local::today().naive_local() - Duration::days(1);
+        rule datetime() -> DateTime<Local>
+            = ts:time_spec() {?
+                chrono_english::parse_date_string(ts, Local::now(), Dialect::Us).or(Err("date"))
+        }
 
-    //         }
-    //     ))
-    // }
-    fn cli_parser(input: Node) -> Result<Cli, pest_consume::Error<Rule>> {
-        todo!()
+        // now build up a few higher-level constructs
+        rule bare_message() -> BareMessage
+            = message:message() { BareMessage { message } }
+        rule colon_message() -> String
+            = ":" ws()* message:message() { message }
+        rule relative_message(require_message: bool) -> RelativeMessage
+            = interval:interval() msg:colon_message()? {?
+                if require_message && msg.is_none() {
+                    Err("message was required but not present")
+                } else {
+                    Ok(RelativeMessage { interval, message: msg.unwrap_or_default() })
+                }
+            }
+        rule absolute_message(require_message: bool) -> AbsoluteMessage
+            = timestamp:datetime() msg:colon_message()? {?
+                if require_message && msg.is_none() {
+                    Err("message was required but not present")
+                } else {
+                    Ok(AbsoluteMessage { timestamp, message: msg.unwrap_or_default() })
+                }
+            }
+
+        // now the parsers for each CLI variant
+        // note the explicit whitespace; we want at least one space after the keyword
+        rule start() -> Cli
+            = "start" m:space_then(<bare_message()>) {
+                Cli::Start(m)
+            }
+        rule stop() -> Cli
+            = "stop" m:space_then(<bare_message()>)? {
+                Cli::Stop(m.unwrap_or_default())
+            }
+        rule started() -> Cli
+            = "started" m:space_then(<relative_message(true)>) {
+                Cli::Started(m)
+            }
+        rule stopped() -> Cli
+            = "stopped" m:space_then(<relative_message(false)>) {
+                Cli::Stopped(m)
+            }
+        rule started_at() -> Cli
+            = "started at" m:space_then(<absolute_message(true)>) {
+                Cli::StartedAt(m)
+            }
+        rule stopped_at() -> Cli
+            = "stopped at" m:space_then(<absolute_message(false)>) {
+                Cli::StoppedAt(m)
+            }
+
+        // TODO later
+        // report = { "report" ~ (space ~ interval)? ~ (space ~ time_tracking)? }
+        // report_for = { "report for" ~ space ~ time_spec ~ time_tracking? }
+
+        // now the actual top-level parser
+        pub rule cli() -> Cli
+            = c:(
+                started_at() /
+                started() /
+                start() /
+                stopped_at() /
+                stopped() /
+                stop()
+            ) { c }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct BareMessage {
     message: String,
 }
@@ -131,7 +137,7 @@ impl RelativeMessage {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AbsoluteMessage {
-    timestamp: DateTime<Utc>,
+    timestamp: DateTime<Local>,
     message: String,
 }
 
@@ -161,35 +167,14 @@ pub enum Cli {
 
 impl Cli {
     fn parse(input: &str) -> Result<Self, Error> {
-        let inputs = CliParser::parse(Rule::cli_parser, input)?;
-        let input = inputs.single()?;
-        CliParser::cli_parser(input)
+        cli_parser::cli(input).map_err(Into::into)
     }
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("parsing human interval from \"{0}\"")]
-    ParseInterval(String, #[source] chrono_english::DateError),
-    #[error("message is required for start variants")]
-    NoStartMessage,
-    #[error("unknown command")]
-    UnknownCommand,
-}
-
-impl From<pest::error::Error<Rule>> for Error {
-    fn from(err: pest::error::Error<Rule>) -> Self {
-        if let pest::error::ErrorVariant::ParsingError {
-            positives,
-            negatives,
-        } = &err.variant
-        {
-            if positives == &[Rule::cli_parser] && negatives.is_empty() {
-                return Error::UnknownCommand;
-            }
-        }
-        todo!()
-    }
+    #[error("parse error")]
+    Peg(#[from] ParseError<LineCol>),
 }
 
 impl PartialEq for Error {
@@ -208,15 +193,15 @@ mod example_tests {
         assert_eq!(Cli::parse(msg).unwrap(), expect);
     }
 
-    fn expect_bad(msg: &str, expect: Error) {
-        assert_eq!(Cli::parse(msg).unwrap_err(), expect);
+    macro_rules! expect_bad {
+        ($msg:expr => $pattern:pat_param) => {
+            assert!(matches!(Cli::parse($msg).unwrap_err(), $pattern))
+        };
     }
 
     #[test]
     fn glorb() {
-        let err = Cli::parse("glorb").unwrap_err();
-        dbg!(&err);
-        assert!(matches!(err, Error::UnknownCommand));
+        expect_bad!("glorb" => Error::Peg(_));
     }
 
     #[test]
@@ -226,7 +211,7 @@ mod example_tests {
 
     #[test]
     fn bare_start() {
-        expect_bad("start", Error::NoStartMessage);
+        expect_bad!("start" => Error::Peg(_));
     }
 
     #[test]
@@ -249,7 +234,7 @@ mod example_tests {
 
     #[test]
     fn started_15m_ago() {
-        expect_bad("started 15m ago", Error::NoStartMessage);
+        expect_bad!("started 15m ago" => Error::Peg(_));
     }
 
     #[test]
