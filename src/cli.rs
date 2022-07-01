@@ -5,9 +5,10 @@
 //
 // Any chance it gives me to explore a bunch of parser libraries is a purely incidental benefit.
 
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Duration, Local};
 use chrono_english::{Dialect, Interval};
 use peg::{error::ParseError, str::LineCol};
+use worklog::action::{Action, Event};
 
 fn no_start_message(require_message: bool, msg: &Option<String>) -> bool {
     require_message && (msg.is_none() || msg.as_ref().map(|msg| msg.is_empty()).unwrap_or_default())
@@ -106,6 +107,18 @@ peg::parser! {
             = "stopped at" m:space_then(<absolute_message(false)>) {
                 Ok(Cli::StoppedAt(m?))
             }
+
+        // path commands
+        rule path_database() -> Result<Cli, Error>
+            = "path" "s"? space() ("database" / "db") {
+                Ok(Cli::PathDatabase)
+            }
+        rule path_config() -> Result<Cli, Error>
+            = "path" "s"? space() "config" {
+                Ok(Cli::PathConfig)
+            }
+
+        // catchall for better error messages
         rule catch_command() -> Result<Cli, Error>
             = quiet!{cmd:$((!ws() [' '..='~'])+) message() {
                 Err(Error::UnknownCommand(cmd.trim().to_owned()))
@@ -124,6 +137,8 @@ peg::parser! {
                 stopped_at() /
                 stopped() /
                 stop() /
+                path_database() /
+                path_config() /
                 // note: this catchall should always be last in the command list
                 catch_command()
             ) { c }
@@ -186,13 +201,54 @@ pub enum Cli {
     //     to: NaiveDate,
     //     time_tracking: bool,
     // },
+    PathDatabase,
+    PathConfig,
 }
 
 impl Cli {
-    fn parse(input: &str) -> Result<Self, Error> {
+    pub fn parse(input: &str) -> Result<Self, Error> {
         cli_parser::cli(input)
             .or_else(|err| Err(Error::UnexpectedParseError(err)))
             .and_then(std::convert::identity)
+    }
+}
+
+fn interval2duration(interval: Interval) -> Duration {
+    match interval {
+        Interval::Seconds(s) => Duration::seconds(s.into()),
+        Interval::Days(d) => Duration::days(d.into()),
+        Interval::Months(m) => Duration::days(Into::<i64>::into(m) * 30),
+    }
+}
+
+impl From<Cli> for Action {
+    fn from(cli: Cli) -> Self {
+        match cli {
+            Cli::Start(BareMessage { message }) => Action::Start(Event {
+                timestamp: Local::now(),
+                message,
+            }),
+            Cli::Stop(BareMessage { message }) => Action::Stop(Event {
+                timestamp: Local::now(),
+                message,
+            }),
+            Cli::Started(RelativeMessage { interval, message }) => Action::Start(Event {
+                timestamp: Local::now() - interval2duration(interval),
+                message,
+            }),
+            Cli::Stopped(RelativeMessage { interval, message }) => Action::Stop(Event {
+                timestamp: Local::now() - interval2duration(interval),
+                message,
+            }),
+            Cli::StartedAt(AbsoluteMessage { timestamp, message }) => {
+                Action::Start(Event { timestamp, message })
+            }
+            Cli::StoppedAt(AbsoluteMessage { timestamp, message }) => {
+                Action::Stop(Event { timestamp, message })
+            }
+            Cli::PathDatabase => Action::PathDatabase,
+            Cli::PathConfig => Action::PathConfig,
+        }
     }
 }
 

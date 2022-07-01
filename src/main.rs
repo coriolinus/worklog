@@ -1,26 +1,15 @@
+use worklog::action::Action;
+
 mod cli;
+use crate::cli::Cli;
 
 fn main() -> color_eyre::eyre::Result<()> {
     color_eyre::install()?;
 
-    todo!("do something with the cli");
-    // let opts = Cli::parse();
-    // match opts.subcommand {
-    //     Command::Paths {
-    //         which: PathSubcommand::Config,
-    //     } => {
-    //         println!("{}", worklog::paths::config().display());
-    //     }
-    //     Command::Paths {
-    //         which: PathSubcommand::Database,
-    //     } => {
-    //         println!("{}", worklog::paths::database().display());
-    //     }
-    //     other => {
-    //         eprintln!("not yet supported:\n{:?}", other);
-    //         panic!("unsupported subcommand");
-    //     }
-    // }
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let args = args.join(" ");
+    let action: Action = Cli::parse(&args)?.into();
+    action.execute()?;
 
     Ok(())
 }
