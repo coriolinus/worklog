@@ -10,6 +10,7 @@ color-eyre = "0.6.1"
 diesel = { version = "1.4.8", features = ["sqlite", "chrono"] }
 diesel_migrations = "1.4.0"
 dirs = "4.0.0"
+lazy_static = "1.4.0"
 peg = "0.8.0"
 pest_derive = "2.1.0"
 supports-hyperlinks = "1.2.0"
