@@ -114,7 +114,7 @@ peg::parser! {
                 Ok(Cli::PathDatabase)
             }
         rule path_config() -> Result<Cli, Error>
-            = "path" "s"? space() "config" {
+            = "path" "s"? space() "conf" "ig"? {
                 Ok(Cli::PathConfig)
             }
 
@@ -270,7 +270,7 @@ pub enum Error {
     NoStartMessage,
     #[error("unknown command: \"{0}\"")]
     UnknownCommand(String),
-    #[error("unexpected parse error")]
+    #[error("error parsing cli")]
     UnexpectedParseError(#[source] ParseError<LineCol>),
 }
 
@@ -279,8 +279,6 @@ impl PartialEq for Error {
         core::mem::discriminant(self) == core::mem::discriminant(other)
     }
 }
-
-impl Eq for Error {}
 
 #[cfg(test)]
 mod example_tests {
