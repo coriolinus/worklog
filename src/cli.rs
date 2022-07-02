@@ -221,31 +221,39 @@ fn interval2duration(interval: Interval) -> Duration {
     }
 }
 
+impl From<BareMessage> for Event {
+    fn from(BareMessage { message }: BareMessage) -> Self {
+        Event {
+            timestamp: Local::now(),
+            message,
+        }
+    }
+}
+
+impl From<RelativeMessage> for Event {
+    fn from(RelativeMessage { interval, message }: RelativeMessage) -> Self {
+        Event {
+            timestamp: Local::now() - interval2duration(interval),
+            message,
+        }
+    }
+}
+
+impl From<AbsoluteMessage> for Event {
+    fn from(AbsoluteMessage { timestamp, message }: AbsoluteMessage) -> Self {
+        Event { timestamp, message }
+    }
+}
+
 impl From<Cli> for Action {
     fn from(cli: Cli) -> Self {
         match cli {
-            Cli::Start(BareMessage { message }) => Action::Start(Event {
-                timestamp: Local::now(),
-                message,
-            }),
-            Cli::Stop(BareMessage { message }) => Action::Stop(Event {
-                timestamp: Local::now(),
-                message,
-            }),
-            Cli::Started(RelativeMessage { interval, message }) => Action::Start(Event {
-                timestamp: Local::now() - interval2duration(interval),
-                message,
-            }),
-            Cli::Stopped(RelativeMessage { interval, message }) => Action::Stop(Event {
-                timestamp: Local::now() - interval2duration(interval),
-                message,
-            }),
-            Cli::StartedAt(AbsoluteMessage { timestamp, message }) => {
-                Action::Start(Event { timestamp, message })
-            }
-            Cli::StoppedAt(AbsoluteMessage { timestamp, message }) => {
-                Action::Stop(Event { timestamp, message })
-            }
+            Cli::Start(msg) => Action::Start(msg.into()),
+            Cli::Stop(msg) => Action::Stop(msg.into()),
+            Cli::Started(msg) => Action::Start(msg.into()),
+            Cli::Stopped(msg) => Action::Stop(msg.into()),
+            Cli::StartedAt(msg) => Action::Start(msg.into()),
+            Cli::StoppedAt(msg) => Action::Stop(msg.into()),
             Cli::PathDatabase => Action::PathDatabase,
             Cli::PathConfig => Action::PathConfig,
         }
