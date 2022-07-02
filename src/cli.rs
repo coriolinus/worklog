@@ -270,7 +270,7 @@ pub enum Error {
     NoStartMessage,
     #[error("unknown command: \"{0}\"")]
     UnknownCommand(String),
-    #[error("error parsing cli")]
+    #[error("parsing cli arguments")]
     UnexpectedParseError(#[source] ParseError<LineCol>),
 }
 
