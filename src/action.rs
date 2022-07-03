@@ -31,28 +31,32 @@ impl Action {
                 println!("{path}");
                 Ok(())
             }
-            Self::Start(_) | Self::Stop(_) => {
-                if let Some(evt) = self.into_db_event() {
-                    evt.insert(conn).await?;
-                    return Ok(());
-                }
-                unreachable!("duplicate check of action variant")
-            }
+            Self::Start(evt) => Self::handle_start_stop(conn, db::EvtType::Start, evt).await,
+            Self::Stop(evt) => Self::handle_start_stop(conn, db::EvtType::Stop, evt).await,
             _ => unimplemented!(),
         }
     }
 
-    fn into_db_event(self) -> Option<db::InsertEvent> {
-        let (evt_type, Event { timestamp, message }) = match self {
-            Action::Start(evt) => (db::EvtType::Start, evt),
-            Action::Stop(evt) => (db::EvtType::Stop, evt),
-            _ => return None,
-        };
-        Some(db::InsertEvent {
+    async fn handle_start_stop(
+        conn: &mut SqliteConnection,
+        evt_type: db::EvtType,
+        Event { timestamp, message }: Event,
+    ) -> Result<(), Error> {
+        let db_evt = db::InsertEvent {
             evt_type,
             timestamp: timestamp.into(),
-            message,
-        })
+            message: message.clone(),
+        };
+        db_evt.insert(conn).await?;
+
+        // output for a start or stop event
+        // TODO: return this instead of emitting it here in the library code
+        let formatted_timestamp = timestamp.format("%Y-%m-%d %H%M");
+        let n_evts_today = db::count_events_today(conn).await?;
+        let evt_type_name = evt_type.name();
+        println!("[{formatted_timestamp}] #{n_evts_today}: {evt_type_name} {message}");
+
+        Ok(())
     }
 }
 

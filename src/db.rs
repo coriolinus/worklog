@@ -1,11 +1,12 @@
 use chrono::{DateTime, Utc};
 use sqlx::{
-    query, query_scalar,
+    query, query_file_scalar, query_scalar,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     Connection, SqliteConnection,
 };
 
 pub type Id = i64;
+pub type Count = i32;
 
 pub async fn establish_connection() -> Result<SqliteConnection, Error> {
     let path = crate::paths::database();
@@ -30,7 +31,7 @@ pub enum EvtType {
 }
 
 impl EvtType {
-    fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             EvtType::Start => "START",
             EvtType::Stop => "STOP",
@@ -63,6 +64,7 @@ impl InsertEvent {
             message,
         } = self;
         let evt_type_id = evt_type.id(conn).await?;
+
         query!(
             "insert into events(evt_type, timestamp, message) values (?, ?, ?) returning id",
             evt_type_id,
@@ -74,6 +76,29 @@ impl InsertEvent {
         .map(|row| row.id)
         .map_err(Error::InsertEvent)
     }
+}
+
+/// Return the count of start events which have happened today
+pub async fn count_events_today(conn: &mut SqliteConnection) -> Result<Count, Error> {
+    use chrono::{Duration, Local, Timelike};
+
+    let start_of_day: DateTime<Utc> = Local::now()
+        .with_hour(0)
+        .expect("hour 0 is valid")
+        .with_minute(0)
+        .expect("minute 0 is valid")
+        .with_second(0)
+        .expect("second 0 is valid")
+        .with_nanosecond(0)
+        .expect("nanosecond 0 is valid")
+        .into();
+
+    let end_of_day = start_of_day + Duration::days(1);
+
+    query_file_scalar!("queries/count_events_today.sql", start_of_day, end_of_day)
+        .fetch_one(conn)
+        .await
+        .map_err(Error::CountEvents)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -88,4 +113,6 @@ pub enum Error {
     GetEvtId(#[source] sqlx::Error),
     #[error("inserting event")]
     InsertEvent(#[source] sqlx::Error),
+    #[error("counting events today")]
+    CountEvents(#[source] sqlx::Error),
 }
