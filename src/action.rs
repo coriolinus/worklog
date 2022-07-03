@@ -42,10 +42,19 @@ impl Action {
         evt_type: db::EvtType,
         Event { timestamp, message }: Event,
     ) -> Result<(), Error> {
+        let truncated_message = {
+            let mut t = message.clone();
+            if message.len() > 40 {
+                t.truncate(39);
+                t.push('…');
+            }
+            t
+        };
+
         let db_evt = db::InsertEvent {
             evt_type,
             timestamp: timestamp.into(),
-            message: message.clone(),
+            message,
         };
         db_evt.insert(conn).await?;
 
@@ -54,7 +63,7 @@ impl Action {
         let formatted_timestamp = timestamp.format("%Y-%m-%d %H%M");
         let n_evts_today = db::count_events_today(conn).await?;
         let evt_type_name = evt_type.name();
-        println!("[{formatted_timestamp}] #{n_evts_today}: {evt_type_name} {message}");
+        println!("[{formatted_timestamp}] #{n_evts_today}: {evt_type_name} {truncated_message}");
 
         Ok(())
     }
