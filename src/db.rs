@@ -14,9 +14,9 @@ pub async fn establish_connection() -> Result<SqliteConnection, Error> {
     let options = SqliteConnectOptions::new()
         .filename(&path)
         .create_if_missing(true)
-        // use write-ahead-log and "normal" mode synchronicity for performance
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal);
+        // this is a very short-lived process, so force synchronicity
+        .journal_mode(SqliteJournalMode::Truncate)
+        .synchronous(SqliteSynchronous::Full);
     let mut connection = SqliteConnection::connect_with(&options)
         .await
         .map_err(Error::Connect)?;
