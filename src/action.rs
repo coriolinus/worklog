@@ -56,14 +56,13 @@ impl Action {
             timestamp: timestamp.into(),
             message,
         };
-        db_evt.insert(conn).await?;
+        let record_number = db_evt.insert(conn).await?;
 
         // output for a start or stop event
         // TODO: return this instead of emitting it here in the library code
         let formatted_timestamp = timestamp.format("%Y-%m-%d %H%M");
-        let n_evts_today = db::count_events_today(conn).await?;
         let evt_type_name = evt_type.name();
-        println!("[{formatted_timestamp}] #{n_evts_today}: {evt_type_name} {truncated_message}");
+        println!("[{formatted_timestamp}] #{record_number}: {evt_type_name} {truncated_message}");
 
         Ok(())
     }

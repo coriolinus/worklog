@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use sqlx::{
-    query, query_file_scalar, query_scalar,
+    query, query_scalar,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     Connection, SqliteConnection,
 };
@@ -65,40 +65,25 @@ impl InsertEvent {
         } = self;
         let evt_type_id = evt_type.id(conn).await?;
 
-        query!(
+        // use a transaction to force this query to finalize
+        let mut tx = conn.begin().await.map_err(Error::InsertEvent)?;
+
+        let id = query!(
             "insert into events(evt_type, timestamp, message) values (?, ?, ?) returning id",
             evt_type_id,
             timestamp,
             message
         )
-        .fetch_one(conn)
+        .fetch_one(&mut tx)
         .await
         .map(|row| row.id)
-        .map_err(Error::InsertEvent)
+        .map_err(Error::InsertEvent)?;
+
+        // finalize the transaction
+        tx.commit().await.map_err(Error::InsertEvent)?;
+
+        Ok(id)
     }
-}
-
-/// Return the count of start events which have happened today
-pub async fn count_events_today(conn: &mut SqliteConnection) -> Result<Count, Error> {
-    use chrono::{Duration, Local, Timelike};
-
-    let start_of_day: DateTime<Utc> = Local::now()
-        .with_hour(0)
-        .expect("hour 0 is valid")
-        .with_minute(0)
-        .expect("minute 0 is valid")
-        .with_second(0)
-        .expect("second 0 is valid")
-        .with_nanosecond(0)
-        .expect("nanosecond 0 is valid")
-        .into();
-
-    let end_of_day = start_of_day + Duration::days(1);
-
-    query_file_scalar!("queries/count_events_today.sql", start_of_day, end_of_day)
-        .fetch_one(conn)
-        .await
-        .map_err(Error::CountEvents)
 }
 
 #[derive(Debug, thiserror::Error)]
