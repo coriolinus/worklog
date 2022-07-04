@@ -40,11 +40,41 @@ peg::parser! {
             = ts:time_spec() "ago"? {
                 chrono_english::parse_duration(ts).map_err(|err| Error::ParseInterval(ts.into(), err))
             }
-        rule datetime() -> Result<DateTime<Local>, Error>
+        // some special handling for specific time formats without the day
+        rule timefragment(first: bool) -> u32
+            = frag:$(['0'..='9']*<{if first {1} else {2}},2>) {
+                frag.parse().expect("all two digit numbers can be parsed into u32")
+            }
+        rule colon_seconds() -> u32
+            = ":" s:timefragment(false) { s }
+        // returns 0 if "a", or 12 if "p".
+        rule am_pm() -> u32
+            = ws()* ap:$("a"/"p"/"A"/"P") ("m"/"M")? {
+                if ap.eq_ignore_ascii_case("p") {
+                    12
+                } else {
+                    0
+                }
+            }
+        rule civilian_time() -> Result<DateTime<Local>, Error>
+            = h:timefragment(true) ":" m:timefragment(false) s:colon_seconds()? pm_offset:am_pm()? {
+                Ok(Local::today().and_hms(h + pm_offset.unwrap_or_default(), m, s.unwrap_or_default()))
+            }
+        rule military_time() -> Result<DateTime<Local>, Error>
+            = h:timefragment(false) m:timefragment(false) s:timefragment(false)? {
+                Ok(Local::today().and_hms(h, m, s.unwrap_or_default()))
+            }
+        rule english_date_time() -> Result<DateTime<Local>, Error>
             = ts:time_spec() {
                 chrono_english::parse_date_string(ts, Local::now(), Dialect::Us)
                     .map_err(|err| Error::ParseDatetime(ts.into(), err))
         }
+        rule datetime() -> Result<DateTime<Local>, Error>
+             = dt:(
+                military_time() /
+                civilian_time() /
+                english_date_time()
+             ) { dt }
 
         // now build up a few higher-level constructs
         rule bare_message(require_message: bool) -> Result<BareMessage, Error>
@@ -179,6 +209,16 @@ pub struct AbsoluteMessage {
     message: String,
 }
 
+impl AbsoluteMessage {
+    /// Create a new Absolute Message at the specified time today
+    #[cfg(test)]
+    fn new<'a>(h: u32, m: u32, message: impl Into<std::borrow::Cow<'a, str>>) -> Self {
+        let message = message.into().into_owned();
+        let timestamp = Local::today().and_hms(h, m, 0);
+        Self { timestamp, message }
+    }
+}
+
 /// This struct represents user input via the CLI.
 #[derive(Debug, PartialEq)]
 pub enum Cli {
@@ -282,6 +322,8 @@ impl PartialEq for Error {
 
 #[cfg(test)]
 mod example_tests {
+    use chrono::Timelike;
+
     use super::*;
 
     fn expect_ok(msg: &str, expect: Cli) {
@@ -347,6 +389,56 @@ mod example_tests {
         expect_ok(
             "stopped 5m ago: #2345",
             Cli::Stopped(RelativeMessage::new(5 * 60, "#2345")),
+        );
+    }
+
+    #[test]
+    fn started_at_0901_foo() {
+        expect_ok(
+            "started at 0901: foo",
+            Cli::StartedAt(AbsoluteMessage::new(9, 1, "foo")),
+        );
+    }
+
+    #[test]
+    fn started_at_1234_bar() {
+        expect_ok(
+            "started at 12:34: bar",
+            Cli::StartedAt(AbsoluteMessage::new(12, 34, "bar")),
+        );
+    }
+
+    #[test]
+    fn started_at_123456_bat() {
+        let mut expect_msg = AbsoluteMessage::new(12, 34, "bat");
+        expect_msg.timestamp = expect_msg
+            .timestamp
+            .with_second(56)
+            .expect("56 is legal seconds");
+        expect_ok("started at 12:34:56: bat", Cli::StartedAt(expect_msg));
+    }
+
+    #[test]
+    fn started_at_123p_ampm() {
+        expect_ok(
+            "started at 1:23p: ampm",
+            Cli::StartedAt(AbsoluteMessage::new(13, 23, "ampm")),
+        );
+    }
+
+    #[test]
+    fn started_at_0926pm_yem() {
+        expect_ok(
+            "started at 09:26 PM: yem",
+            Cli::StartedAt(AbsoluteMessage::new(12 + 9, 26, "yem")),
+        );
+    }
+
+    #[test]
+    fn started_at_123_p_ampm() {
+        expect_ok(
+            "started at 1:23 p: ampm",
+            Cli::StartedAt(AbsoluteMessage::new(13, 23, "ampm")),
         );
     }
 }
