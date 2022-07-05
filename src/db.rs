@@ -1,6 +1,7 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
+use futures::TryStreamExt;
 use sqlx::{
-    query, query_scalar,
+    query, query_file_as, query_scalar,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqliteSynchronous},
     Connection, SqliteConnection,
 };
@@ -46,6 +47,24 @@ impl EvtType {
             .map(|maybe_id| maybe_id.expect("name is definitely in the db"))
             .map_err(Error::GetEvtId)
     }
+
+    /// Create a function which converts numeric IDs back into instances of Self.
+    ///
+    /// This ideally be quite fast, if we're avoiding just doing the natural SQL thing.
+    async fn unmap(conn: &mut SqliteConnection) -> Result<impl Fn(Id) -> Option<Self>, Error> {
+        let start_id = Self::Start.id(conn).await?;
+        let stop_id = Self::Stop.id(conn).await?;
+
+        Ok(move |id| {
+            if id == start_id {
+                Some(Self::Start)
+            } else if id == stop_id {
+                Some(Self::Stop)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 /// This type can be inserted into the Event database.
@@ -86,6 +105,59 @@ impl InsertEvent {
     }
 }
 
+#[derive(sqlx::FromRow)]
+struct RawRetrieveEvent {
+    id: Id,
+    evt_type: Id,
+    timestamp: NaiveDateTime,
+    message: String,
+}
+
+pub struct RetrieveEvent {
+    pub id: Id,
+    pub evt_type: EvtType,
+    pub timestamp: DateTime<Utc>,
+    pub message: String,
+}
+
+impl RetrieveEvent {
+    /// Retrieve the events between `start` (inclusive) and `end` (exclusive).
+    // TODO: rethink this interface, we need to handle overnight explicitly-stopped events
+    pub async fn events_between(
+        conn: &mut SqliteConnection,
+        start: DateTime<Utc>,
+        end: DateTime<Utc>,
+    ) -> Result<Vec<Self>, Error> {
+        let unmap_evt = EvtType::unmap(conn).await?;
+
+        let mut events = Vec::new();
+        let mut raw_event_stream =
+            query_file_as!(RawRetrieveEvent, "queries/events_between.sql", start, end).fetch(conn);
+
+        while let Some(raw_event) = raw_event_stream
+            .try_next()
+            .await
+            .map_err(Error::RetrieveEvents)?
+        {
+            let evt_type =
+                unmap_evt(raw_event.evt_type).expect("only known event types appear here");
+            let timestamp = Utc
+                .from_local_datetime(&raw_event.timestamp)
+                .single()
+                .expect("roundtrip conversions to/from UTC should be unambiguous");
+
+            events.push(Self {
+                id: raw_event.id,
+                evt_type,
+                timestamp,
+                message: raw_event.message,
+            });
+        }
+
+        Ok(events)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("creating the database parent directory")]
@@ -100,4 +172,6 @@ pub enum Error {
     InsertEvent(#[source] sqlx::Error),
     #[error("counting events today")]
     CountEvents(#[source] sqlx::Error),
+    #[error("retrieving events")]
+    RetrieveEvents(#[source] sqlx::Error),
 }

@@ -5,7 +5,7 @@
 //
 // Any chance it gives me to explore a bunch of parser libraries is a purely incidental benefit.
 
-use chrono::{DateTime, Duration, Local};
+use chrono::{Date, DateTime, Duration, Local};
 use chrono_english::{Dialect, Interval};
 use peg::{error::ParseError, str::LineCol};
 use worklog::action::{Action, Event};
@@ -23,9 +23,6 @@ peg::parser! {
 
         // some basic components:
         // ---------------------
-        // time tracking flag isn't part of other messages
-        rule time_tracking() -> ()
-            = "--time-tracking" / "--tt" { () }
         // messages are essentially anything which fits on a single line
         // turns out that in ASCII, you can express this as the single range below
         rule message() -> String
@@ -33,7 +30,7 @@ peg::parser! {
             / expected!("message")
         // time specs can't contain colons
         rule time_spec() -> &'input str
-            = quiet!{ts:$((!(":" / "ago" / time_tracking()) [' '..='~'])*) { ts.trim() }}
+            = quiet!{ts:$((!(":" / "ago") [' '..='~'])*) { ts.trim() }}
             / expected!("time_spec")
         // interval might end with "ago"
         rule interval() -> Result<Interval, Error>
@@ -148,15 +145,24 @@ peg::parser! {
                 Ok(Cli::PathConfig)
             }
 
+        // we need to be able to create reports for particular days
+        rule for_when() -> Result<Date<Local>, Error>
+            = "for"? when:time_spec() {
+                chrono_english::parse_date_string(when.trim(), Local::now(), Dialect::Us)
+                    .map(|dt| dt.date())
+                    .map_err(|err| Error::ParseDatetime(when.into(), err))
+            }
+        rule report() -> Result<Cli, Error>
+            = "report" date:space_then(<for_when()>)? {
+                let date = date.transpose()?.unwrap_or_else(|| Local::today());
+                Ok(Cli::Report(date))
+            }
+
         // catchall for better error messages
         rule catch_command() -> Result<Cli, Error>
             = quiet!{cmd:$((!ws() [' '..='~'])+) message() {
                 Err(Error::UnknownCommand(cmd.trim().to_owned()))
             }}
-
-        // TODO later
-        // report = { "report" ~ (space ~ interval)? ~ (space ~ time_tracking)? }
-        // report_for = { "report for" ~ space ~ time_spec ~ time_tracking? }
 
         // now the actual top-level parser
         pub rule cli() -> Result<Cli, Error>
@@ -169,6 +175,7 @@ peg::parser! {
                 stop() /
                 path_database() /
                 path_config() /
+                report() /
                 // note: this catchall should always be last in the command list
                 catch_command()
             ) { c }
@@ -228,19 +235,7 @@ pub enum Cli {
     Stopped(RelativeMessage),
     StartedAt(AbsoluteMessage),
     StoppedAt(AbsoluteMessage),
-    // Report {
-    //     relative_time: Duration,
-    //     time_tracking: bool,
-    // },
-    // ReportFor {
-    //     date: NaiveDate,
-    //     time_tracking: bool,
-    // },
-    // ReportSpan {
-    //     from: NaiveDate,
-    //     to: NaiveDate,
-    //     time_tracking: bool,
-    // },
+    Report(Date<Local>),
     PathDatabase,
     PathConfig,
 }
@@ -296,6 +291,7 @@ impl From<Cli> for Action {
             Cli::StoppedAt(msg) => Action::Stop(msg.into()),
             Cli::PathDatabase => Action::PathDatabase,
             Cli::PathConfig => Action::PathConfig,
+            Cli::Report(date) => Action::Report(date),
         }
     }
 }
@@ -322,7 +318,7 @@ impl PartialEq for Error {
 
 #[cfg(test)]
 mod example_tests {
-    use chrono::Timelike;
+    use chrono::{TimeZone, Timelike};
 
     use super::*;
 
@@ -440,5 +436,33 @@ mod example_tests {
             "started at 1:23 p: ampm",
             Cli::StartedAt(AbsoluteMessage::new(13, 23, "ampm")),
         );
+    }
+
+    #[test]
+    fn report_bare() {
+        expect_ok("report", Cli::Report(Local::today()))
+    }
+
+    #[test]
+    fn report_today() {
+        expect_ok("report today", Cli::Report(Local::today()))
+    }
+
+    #[test]
+    fn report_yesterday() {
+        expect_ok("report yesterday", Cli::Report(Local::today().pred()))
+    }
+
+    #[test]
+    fn report_2022_07_04() {
+        expect_ok(
+            "report 2022-07-04",
+            Cli::Report(
+                Local
+                    .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
+                    .single()
+                    .expect("date is unambiguous"),
+            ),
+        )
     }
 }
