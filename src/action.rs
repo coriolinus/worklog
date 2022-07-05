@@ -86,7 +86,7 @@ impl fmt::Display for Task {
         let stop = self
             .stop
             .map(|stop| stop.format("%H%M").to_string())
-            .unwrap_or(String::from("…"));
+            .unwrap_or(String::from("…   "));
         let duration = self
             .stop
             // TODO: configure default stop time
