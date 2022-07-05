@@ -134,6 +134,8 @@ async fn handle_report(conn: &mut SqliteConnection, date: Date<Local>) -> Result
     }
 
     // now emit all tasks
+    println!("{}:", date.format("%Y-%m-%d"));
+    println!("-----------");
     for task in tasks {
         println!("{task}");
     }
