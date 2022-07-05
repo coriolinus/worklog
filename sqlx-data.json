@@ -1,0 +1,75 @@
+{
+  "db": "SQLite",
+  "2707db5051f4e75830c2463917e4a1a5b7b97fd10d0975d00d07e8633828c479": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Int64"
+        }
+      ],
+      "nullable": [
+        false
+      ],
+      "parameters": {
+        "Right": 3
+      }
+    },
+    "query": "insert into events(evt_type, timestamp, message) values (?, ?, ?) returning id"
+  },
+  "4cc9bf05eb5e3f9fbff5afd3e4658508764289d806d44cd5acd61db4868896da": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Int64"
+        }
+      ],
+      "nullable": [
+        false
+      ],
+      "parameters": {
+        "Right": 1
+      }
+    },
+    "query": "select id from evt_type where name = ?"
+  },
+  "ac37a687ef86d55d3d77b5627a406faea99afb75e9d02034e0e50b3d569d205b": {
+    "describe": {
+      "columns": [
+        {
+          "name": "id",
+          "ordinal": 0,
+          "type_info": "Int64"
+        },
+        {
+          "name": "evt_type",
+          "ordinal": 1,
+          "type_info": "Int64"
+        },
+        {
+          "name": "timestamp",
+          "ordinal": 2,
+          "type_info": "Datetime"
+        },
+        {
+          "name": "message",
+          "ordinal": 3,
+          "type_info": "Text"
+        }
+      ],
+      "nullable": [
+        false,
+        false,
+        false,
+        false
+      ],
+      "parameters": {
+        "Right": 2
+      }
+    },
+    "query": "SELECT id, evt_type, timestamp, message\nFROM events\nWHERE\n    timestamp >= ?\n    AND timestamp < ?\nORDER BY timestamp ASC\n;\n"
+  }
+}

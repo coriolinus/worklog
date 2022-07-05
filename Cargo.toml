@@ -11,7 +11,7 @@ dirs = "4.0.0"
 futures = "0.3.21"
 lazy_static = "1.4.0"
 peg = "0.8.0"
-sqlx = { version = "0.6.0", features = ["sqlite", "runtime-tokio-rustls", "chrono", "migrate"] }
+sqlx = { version = "0.6.0", features = ["sqlite", "runtime-tokio-rustls", "chrono", "migrate", "offline"] }
 supports-hyperlinks = "1.2.0"
 terminal-link = "0.1.0"
 thiserror = "1.0.31"
