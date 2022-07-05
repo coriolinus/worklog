@@ -80,6 +80,12 @@ struct Task {
     message: String,
 }
 
+impl Task {
+    fn duration(&self) -> Option<Duration> {
+        self.stop.map(|stop| stop - self.start)
+    }
+}
+
 impl fmt::Display for Task {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let start = self.start.format("%H%M");
@@ -87,13 +93,10 @@ impl fmt::Display for Task {
             .stop
             .map(|stop| stop.format("%H%M").to_string())
             .unwrap_or(String::from("…   "));
-        let duration = self
-            .stop
-            // TODO: configure default stop time
-            .map(|stop| stop - self.start)
-            .unwrap_or(Duration::zero());
-        let hours = duration.num_hours();
-        let minutes = duration.num_minutes() % 60;
+        let duration = self.duration().unwrap_or(Duration::zero());
+        let minutes = duration.num_minutes();
+        let hours = minutes / 60;
+        let minutes = minutes % 60;
         let id = self.id;
         let message = &self.message;
 
@@ -136,9 +139,19 @@ async fn handle_report(conn: &mut SqliteConnection, date: Date<Local>) -> Result
     // now emit all tasks
     println!("{}:", date.format("%Y-%m-%d"));
     println!("-----------");
-    for task in tasks {
+    for task in &tasks {
         println!("{task}");
     }
+    println!("-----------");
+    let n = tasks.len();
+    let total: Duration = tasks
+        .iter()
+        .map(|task| task.duration().unwrap_or(Duration::zero()))
+        .fold(Duration::zero(), |total, item| total + item);
+    let minutes = total.num_minutes();
+    let hours = minutes / 60;
+    let minutes = minutes % 60;
+    println!(" {n:2} tasks   {hours:2}:{minutes:02}");
 
     Ok(())
 }
