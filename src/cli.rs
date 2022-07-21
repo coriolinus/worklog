@@ -55,11 +55,11 @@ peg::parser! {
             }
         rule civilian_time() -> Result<DateTime<Local>, Error>
             = h:timefragment(true) ":" m:timefragment(false) s:colon_seconds()? pm_offset:am_pm()? {
-                Ok(Local::today().and_hms(h + pm_offset.unwrap_or_default(), m, s.unwrap_or_default()))
+                Local::today().and_hms_opt(h + pm_offset.unwrap_or_default(), m, s.unwrap_or_default()).ok_or(Error::InvalidTime)
             }
         rule military_time() -> Result<DateTime<Local>, Error>
             = h:timefragment(false) m:timefragment(false) s:timefragment(false)? {
-                Ok(Local::today().and_hms(h, m, s.unwrap_or_default()))
+                Local::today().and_hms_opt(h, m, s.unwrap_or_default()).ok_or(Error::InvalidTime)
             }
         rule english_date_time() -> Result<DateTime<Local>, Error>
             = ts:time_spec() {
@@ -308,6 +308,8 @@ pub enum Error {
     UnknownCommand(String),
     #[error("parsing cli arguments")]
     UnexpectedParseError(#[source] ParseError<LineCol>),
+    #[error("invalid time")]
+    InvalidTime,
 }
 
 impl PartialEq for Error {
@@ -436,6 +438,12 @@ mod example_tests {
             "started at 1:23 p: ampm",
             Cli::StartedAt(AbsoluteMessage::new(13, 23, "ampm")),
         );
+    }
+
+    #[test]
+    fn started_at_2403_3452() {
+        // just test that this doesn't actually panic
+        expect_bad!("started at 2403: 3452" => Error::InvalidTime);
     }
 
     #[test]
