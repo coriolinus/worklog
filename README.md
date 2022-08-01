@@ -12,9 +12,7 @@ Ever had the sinking feeling, at a standup or a sprint review, of "What the hell
 - Start working on a task at a particular time: `worklog started at 0845: #2345`. Logs that you started working on #2345 at 0845 this morning. The colon is syncactically significant and cannot be omitted.
 - Stopping work has `stopped` and `stopped at` variants also with equivalent syntax for logging stopping work.
 - What did you do yesterday: `worklog report yesterday`. Lists all tasks started yesterday, ordered by start time.
-- What did you do on a particular day: `worklog report for Monday`. Lists all tasks started on Monday, ordered by start time.
-- How much time did you spend on each task yesterday: `worklog report --time-tracking yesterday`. Lists all tasks worked on yesterday, ordered by duration of work.
-- What did you do over the span of several days: `worklog report span "two Mondays ago" "now"`. Lists all tasks worked on from two Mondays ago until now.
+- What did you do on a particular day: `worklog report for last Monday`. Lists all tasks started on Monday, ordered by start time.
 
 ## Model
 
@@ -26,7 +24,3 @@ Ever had the sinking feeling, at a standup or a sprint review, of "What the hell
   - `foo/bar#1234` looks like a link to `https://github.com/foo/bar/issues/1234`.
 - Things enclosed in angle bracket pairs are also assumed to be links:
   - `<example.org>` looks like a link to `https://example.org`.
-- If an assumed end-of-work time is configured, then a trailing orphan task (which is neither explicitly nor implicitly stopped on the same day), if started before that time, will be assumed for time-tracking purposes to end at that time.
-  - Trailing orphan tasks started after the assumed end-of-work time are assumed to end at midnight.
-  - Explicitly stopped tasks respect the explicit stop time; they are not trailing orphans.
-  - Explicitly stopped tasks do not have to be stopped on the same day; midnight is no artificial barrier.
