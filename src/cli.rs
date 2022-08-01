@@ -158,6 +158,13 @@ peg::parser! {
                 Ok(Cli::Report(date))
             }
 
+        // we want to be able to list all the events for a particular date
+        rule events_list() -> Result<Cli, Error>
+            = "events" space_then(<"list">)? date:space_then(<for_when()>)? {
+                let date = date.transpose()?.unwrap_or_else(|| Local::today());
+                Ok(Cli::EventsList(date))
+            }
+
         // catchall for better error messages
         rule catch_command() -> Result<Cli, Error>
             = quiet!{cmd:$((!ws() [' '..='~'])+) message() {
@@ -176,6 +183,7 @@ peg::parser! {
                 path_database() /
                 path_config() /
                 report() /
+                events_list() /
                 // note: this catchall should always be last in the command list
                 catch_command()
             ) { c }
@@ -238,6 +246,7 @@ pub enum Cli {
     Report(Date<Local>),
     PathDatabase,
     PathConfig,
+    EventsList(Date<Local>),
 }
 
 impl Cli {
@@ -292,6 +301,7 @@ impl From<Cli> for Action {
             Cli::PathDatabase => Action::PathDatabase,
             Cli::PathConfig => Action::PathConfig,
             Cli::Report(date) => Action::Report(date),
+            Cli::EventsList(date) => Action::EventsList(date),
         }
     }
 }
@@ -466,6 +476,65 @@ mod example_tests {
         expect_ok(
             "report 2022-07-04",
             Cli::Report(
+                Local
+                    .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
+                    .single()
+                    .expect("date is unambiguous"),
+            ),
+        )
+    }
+
+    #[test]
+    fn events_bare() {
+        expect_ok("events", Cli::EventsList(Local::today()))
+    }
+
+    #[test]
+    fn events_today() {
+        expect_ok("events today", Cli::EventsList(Local::today()))
+    }
+
+    #[test]
+    fn events_yesterday() {
+        expect_ok("events yesterday", Cli::EventsList(Local::today().pred()))
+    }
+
+    #[test]
+    fn events_2022_07_04() {
+        expect_ok(
+            "events 2022-07-04",
+            Cli::EventsList(
+                Local
+                    .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
+                    .single()
+                    .expect("date is unambiguous"),
+            ),
+        )
+    }
+
+    #[test]
+    fn events_list_bare() {
+        expect_ok("events list", Cli::EventsList(Local::today()))
+    }
+
+    #[test]
+    fn events_list_today() {
+        expect_ok("events list today", Cli::EventsList(Local::today()))
+    }
+
+    #[test]
+    fn events_list_yesterday() {
+        expect_ok(
+            "events list yesterday",
+            Cli::EventsList(Local::today().pred()),
+        )
+    }
+
+    #[test]
+    fn events_list_2022_07_04() {
+        expect_ok(
+            "events list 2022-07-04",
+            Cli::EventsList(
                 Local
                     .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
                     .single()

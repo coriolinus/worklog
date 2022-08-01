@@ -19,6 +19,7 @@ pub enum Action {
     Report(Date<Local>),
     PathDatabase,
     PathConfig,
+    EventsList(Date<Local>),
 }
 
 impl Action {
@@ -39,6 +40,7 @@ impl Action {
             Self::Start(evt) => handle_start_stop(conn, db::EvtType::Start, evt).await,
             Self::Stop(evt) => handle_start_stop(conn, db::EvtType::Stop, evt).await,
             Self::Report(date) => handle_report(conn, date).await,
+            Self::EventsList(date) => handle_events_list(conn, date).await,
         }
     }
 }
@@ -152,6 +154,34 @@ async fn handle_report(conn: &mut SqliteConnection, date: Date<Local>) -> Result
     let hours = minutes / 60;
     let minutes = minutes % 60;
     println!(" {n:2} tasks   {hours:2}:{minutes:02}");
+
+    Ok(())
+}
+
+async fn handle_events_list(conn: &mut SqliteConnection, date: Date<Local>) -> Result<(), Error> {
+    // get the list of events for the report period
+    let local_midnight: DateTime<Utc> = date.and_hms(0, 0, 0).into();
+    let next_day = local_midnight + Duration::days(1);
+    let events = RetrieveEvent::events_between(conn, local_midnight, next_day).await?;
+
+    // now emit all events
+    println!("{}:", date.format("%Y-%m-%d"));
+    println!("-----------");
+    for event in &events {
+        let RetrieveEvent {
+            id,
+            evt_type,
+            timestamp,
+            message,
+        } = event;
+
+        let timestamp: DateTime<Local> = (*timestamp).into();
+        let timestamp = timestamp.format("%H%M%S");
+        let evt_type = evt_type.name();
+
+        println!("#{id} {timestamp}: {evt_type} {message}");
+    }
+    println!("-----------");
 
     Ok(())
 }
