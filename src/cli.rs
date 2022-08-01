@@ -8,7 +8,10 @@
 use chrono::{Date, DateTime, Duration, Local};
 use chrono_english::{Dialect, Interval};
 use peg::{error::ParseError, str::LineCol};
-use worklog::action::{Action, Event};
+use worklog::{
+    action::{Action, Event},
+    db::Id,
+};
 
 fn no_start_message(require_message: bool, msg: &Option<String>) -> bool {
     require_message && (msg.is_none() || msg.as_ref().map(|msg| msg.is_empty()).unwrap_or_default())
@@ -165,6 +168,15 @@ peg::parser! {
                 Ok(Cli::EventsList(date))
             }
 
+        // we want to be able to remove a particular event
+        rule event_id() -> Id = id:$(['0'..='9']+) {
+            id.parse().expect("all sensibly-sized numbers can be parsed into an Id")
+        }
+        rule event_rm() -> Result<Cli, Error>
+            = "event" "s"? space_then(<("rm"/"remove"/"del" "ete"?)>) id:space_then(<event_id()>) {
+                Ok(Cli::EventRm(id))
+            }
+
         // catchall for better error messages
         rule catch_command() -> Result<Cli, Error>
             = quiet!{cmd:$((!ws() [' '..='~'])+) message() {
@@ -183,6 +195,7 @@ peg::parser! {
                 path_database() /
                 path_config() /
                 report() /
+                event_rm() /
                 events_list() /
                 // note: this catchall should always be last in the command list
                 catch_command()
@@ -247,6 +260,7 @@ pub enum Cli {
     PathDatabase,
     PathConfig,
     EventsList(Date<Local>),
+    EventRm(Id),
 }
 
 impl Cli {
@@ -302,6 +316,7 @@ impl From<Cli> for Action {
             Cli::PathConfig => Action::PathConfig,
             Cli::Report(date) => Action::Report(date),
             Cli::EventsList(date) => Action::EventsList(date),
+            Cli::EventRm(id) => Action::EventRm(id),
         }
     }
 }
@@ -541,5 +556,45 @@ mod example_tests {
                     .expect("date is unambiguous"),
             ),
         )
+    }
+
+    #[test]
+    fn event_rm_1() {
+        expect_ok("event rm 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn events_rm_1() {
+        expect_ok("events rm 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn event_remove_1() {
+        expect_ok("event remove 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn events_remove_1() {
+        expect_ok("events remove 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn event_del_1() {
+        expect_ok("event del 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn events_del_1() {
+        expect_ok("events del 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn event_delete_1() {
+        expect_ok("event delete 1", Cli::EventRm(1))
+    }
+
+    #[test]
+    fn events_delete_1() {
+        expect_ok("events delete 1", Cli::EventRm(1))
     }
 }

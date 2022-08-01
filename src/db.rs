@@ -158,6 +158,18 @@ impl RetrieveEvent {
     }
 }
 
+/// Delete an event from the database.
+///
+/// Return whether or not the event was deleted successfully.
+/// Normally this will only be `Ok(false)` if an unused `Id` was entered.
+pub async fn delete_event(conn: &mut SqliteConnection, event: Id) -> Result<bool, Error> {
+    query!("DELETE FROM events WHERE id = ?", event)
+        .execute(conn)
+        .await
+        .map(|query_result| query_result.rows_affected() != 0)
+        .map_err(Error::DeleteEvent)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("creating the database parent directory")]
@@ -174,4 +186,6 @@ pub enum Error {
     CountEvents(#[source] sqlx::Error),
     #[error("retrieving events")]
     RetrieveEvents(#[source] sqlx::Error),
+    #[error("deleting event")]
+    DeleteEvent(#[source] sqlx::Error),
 }

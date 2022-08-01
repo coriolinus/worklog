@@ -20,6 +20,7 @@ pub enum Action {
     PathDatabase,
     PathConfig,
     EventsList(Date<Local>),
+    EventRm(Id),
 }
 
 impl Action {
@@ -41,6 +42,7 @@ impl Action {
             Self::Stop(evt) => handle_start_stop(conn, db::EvtType::Stop, evt).await,
             Self::Report(date) => handle_report(conn, date).await,
             Self::EventsList(date) => handle_events_list(conn, date).await,
+            Self::EventRm(id) => handle_event_rm(conn, id).await,
         }
     }
 }
@@ -184,6 +186,13 @@ async fn handle_events_list(conn: &mut SqliteConnection, date: Date<Local>) -> R
     println!("-----------");
 
     Ok(())
+}
+
+async fn handle_event_rm(conn: &mut SqliteConnection, id: Id) -> Result<(), Error> {
+    db::delete_event(conn, id)
+        .await
+        .map(|_| ())
+        .map_err(Into::into)
 }
 
 #[derive(Debug, thiserror::Error)]
