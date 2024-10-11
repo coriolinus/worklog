@@ -1,6 +1,6 @@
 use std::fmt;
 
-use chrono::{Date, DateTime, Duration, Local, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone as _, Utc};
 use sqlx::SqliteConnection;
 
 use crate::{
@@ -16,10 +16,10 @@ pub struct Event {
 pub enum Action {
     Start(Event),
     Stop(Event),
-    Report(Date<Local>),
+    Report(NaiveDate),
     PathDatabase,
     PathConfig,
-    EventsList(Date<Local>),
+    EventsList(NaiveDate),
     EventRm(Id),
 }
 
@@ -111,9 +111,18 @@ impl fmt::Display for Task {
     }
 }
 
-async fn handle_report(conn: &mut SqliteConnection, date: Date<Local>) -> Result<(), Error> {
+fn midnight_of(date: NaiveDate) -> Result<DateTime<Utc>, Error> {
+    let dt = Local
+        .from_local_datetime(&NaiveDateTime::from(date))
+        .earliest()
+        .ok_or(Error::AmbiguousLocalMidnight)?
+        .into();
+    Ok(dt)
+}
+
+async fn handle_report(conn: &mut SqliteConnection, date: NaiveDate) -> Result<(), Error> {
     // get the list of events for the report period
-    let local_midnight: DateTime<Utc> = date.and_hms(0, 0, 0).into();
+    let local_midnight = midnight_of(date)?;
     let next_day = local_midnight + Duration::days(1);
     let events = RetrieveEvent::events_between(conn, local_midnight, next_day).await?;
 
@@ -160,9 +169,9 @@ async fn handle_report(conn: &mut SqliteConnection, date: Date<Local>) -> Result
     Ok(())
 }
 
-async fn handle_events_list(conn: &mut SqliteConnection, date: Date<Local>) -> Result<(), Error> {
+async fn handle_events_list(conn: &mut SqliteConnection, date: NaiveDate) -> Result<(), Error> {
     // get the list of events for the report period
-    let local_midnight: DateTime<Utc> = date.and_hms(0, 0, 0).into();
+    let local_midnight = midnight_of(date)?;
     let next_day = local_midnight + Duration::days(1);
     let events = RetrieveEvent::events_between(conn, local_midnight, next_day).await?;
 
@@ -197,6 +206,8 @@ async fn handle_event_rm(conn: &mut SqliteConnection, id: Id) -> Result<(), Erro
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("ambiguous time for local midnight")]
+    AmbiguousLocalMidnight,
     #[error("executing database action")]
     Db(#[from] db::Error),
 }

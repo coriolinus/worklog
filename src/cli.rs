@@ -5,7 +5,7 @@
 //
 // Any chance it gives me to explore a bunch of parser libraries is a purely incidental benefit.
 
-use chrono::{Date, DateTime, Duration, Local};
+use chrono::{DateTime, Duration, Local, NaiveDate, TimeZone as _};
 use chrono_english::{Dialect, Interval};
 use peg::{error::ParseError, str::LineCol};
 use worklog::{
@@ -58,11 +58,13 @@ peg::parser! {
             }
         rule civilian_time() -> Result<DateTime<Local>, Error>
             = h:timefragment(true) ":" m:timefragment(false) s:colon_seconds()? pm_offset:am_pm()? {
-                Local::today().and_hms_opt(h + pm_offset.unwrap_or_default(), m, s.unwrap_or_default()).ok_or(Error::InvalidTime)
+                let naive = Local::now().date_naive().and_hms_opt(h + pm_offset.unwrap_or_default(), m, s.unwrap_or_default()).ok_or(Error::InvalidTime)?;
+                Local.from_local_datetime(&naive).earliest().ok_or(Error::InvalidTime)
             }
         rule military_time() -> Result<DateTime<Local>, Error>
             = h:timefragment(false) m:timefragment(false) s:timefragment(false)? {
-                Local::today().and_hms_opt(h, m, s.unwrap_or_default()).ok_or(Error::InvalidTime)
+                let naive = Local::now().date_naive().and_hms_opt(h, m, s.unwrap_or_default()).ok_or(Error::InvalidTime)?;
+                Local.from_local_datetime(&naive).earliest().ok_or(Error::InvalidTime)
             }
         rule english_date_time() -> Result<DateTime<Local>, Error>
             = ts:time_spec() {
@@ -149,22 +151,22 @@ peg::parser! {
             }
 
         // we need to be able to create reports for particular days
-        rule for_when() -> Result<Date<Local>, Error>
+        rule for_when() -> Result<NaiveDate, Error>
             = "for"? when:time_spec() {
                 chrono_english::parse_date_string(when.trim(), Local::now(), Dialect::Us)
-                    .map(|dt| dt.date())
+                    .map(|dt| dt.date_naive())
                     .map_err(|err| Error::ParseDatetime(when.into(), err))
             }
         rule report() -> Result<Cli, Error>
             = "report" date:space_then(<for_when()>)? {
-                let date = date.transpose()?.unwrap_or_else(|| Local::today());
+                let date = date.transpose()?.unwrap_or_else(|| Local::now().date_naive());
                 Ok(Cli::Report(date))
             }
 
         // we want to be able to list all the events for a particular date
         rule events_list() -> Result<Cli, Error>
             = "events" space_then(<"list">)? date:space_then(<for_when()>)? {
-                let date = date.transpose()?.unwrap_or_else(|| Local::today());
+                let date = date.transpose()?.unwrap_or_else(|| Local::now().date_naive());
                 Ok(Cli::EventsList(date))
             }
 
@@ -242,7 +244,15 @@ impl AbsoluteMessage {
     #[cfg(test)]
     fn new<'a>(h: u32, m: u32, message: impl Into<std::borrow::Cow<'a, str>>) -> Self {
         let message = message.into().into_owned();
-        let timestamp = Local::today().and_hms(h, m, 0);
+        let timestamp = Local
+            .from_local_datetime(
+                &Local::now()
+                    .date_naive()
+                    .and_hms_opt(h, m, 0)
+                    .expect("specified time is valid"),
+            )
+            .earliest()
+            .expect("specified time is unambiguous");
         Self { timestamp, message }
     }
 }
@@ -256,17 +266,17 @@ pub enum Cli {
     Stopped(RelativeMessage),
     StartedAt(AbsoluteMessage),
     StoppedAt(AbsoluteMessage),
-    Report(Date<Local>),
+    Report(NaiveDate),
     PathDatabase,
     PathConfig,
-    EventsList(Date<Local>),
+    EventsList(NaiveDate),
     EventRm(Id),
 }
 
 impl Cli {
     pub fn parse(input: &str) -> Result<Self, Error> {
         cli_parser::cli(input)
-            .or_else(|err| Err(Error::UnexpectedParseError(err)))
+            .map_err(Error::UnexpectedParseError)
             .and_then(std::convert::identity)
     }
 }
@@ -473,75 +483,74 @@ mod example_tests {
 
     #[test]
     fn report_bare() {
-        expect_ok("report", Cli::Report(Local::today()))
+        expect_ok("report", Cli::Report(Local::now().date_naive()))
     }
 
     #[test]
     fn report_today() {
-        expect_ok("report today", Cli::Report(Local::today()))
+        expect_ok("report today", Cli::Report(Local::now().date_naive()))
     }
 
     #[test]
     fn report_yesterday() {
-        expect_ok("report yesterday", Cli::Report(Local::today().pred()))
+        expect_ok(
+            "report yesterday",
+            Cli::Report(Local::now().date_naive().pred()),
+        )
     }
 
     #[test]
     fn report_2022_07_04() {
         expect_ok(
             "report 2022-07-04",
-            Cli::Report(
-                Local
-                    .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
-                    .single()
-                    .expect("date is unambiguous"),
-            ),
+            Cli::Report(chrono::NaiveDate::from_ymd(2022, 07, 04)),
         )
     }
 
     #[test]
     fn events_bare() {
-        expect_ok("events", Cli::EventsList(Local::today()))
+        expect_ok("events", Cli::EventsList(Local::now().date_naive()))
     }
 
     #[test]
     fn events_today() {
-        expect_ok("events today", Cli::EventsList(Local::today()))
+        expect_ok("events today", Cli::EventsList(Local::now().date_naive()))
     }
 
     #[test]
     fn events_yesterday() {
-        expect_ok("events yesterday", Cli::EventsList(Local::today().pred()))
+        expect_ok(
+            "events yesterday",
+            Cli::EventsList(Local::now().date_naive().pred()),
+        )
     }
 
     #[test]
     fn events_2022_07_04() {
         expect_ok(
             "events 2022-07-04",
-            Cli::EventsList(
-                Local
-                    .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
-                    .single()
-                    .expect("date is unambiguous"),
-            ),
+            Cli::EventsList(chrono::NaiveDate::from_ymd(2022, 07, 04)),
         )
     }
 
     #[test]
     fn events_list_bare() {
-        expect_ok("events list", Cli::EventsList(Local::today()))
+        expect_ok("events list", Cli::EventsList(Local::now().date_naive()))
     }
 
     #[test]
     fn events_list_today() {
-        expect_ok("events list today", Cli::EventsList(Local::today()))
+        expect_ok(
+            "events list today",
+            Cli::EventsList(Local::now().date_naive()),
+        )
     }
 
     #[test]
     fn events_list_yesterday() {
         expect_ok(
             "events list yesterday",
-            Cli::EventsList(Local::today().pred()),
+            Cli::EventsList(Local::now().date_naive().pred()),
         )
     }
 
@@ -549,12 +558,7 @@ mod example_tests {
     fn events_list_2022_07_04() {
         expect_ok(
             "events list 2022-07-04",
-            Cli::EventsList(
-                Local
-                    .from_local_date(&chrono::NaiveDate::from_ymd(2022, 07, 04))
-                    .single()
-                    .expect("date is unambiguous"),
-            ),
+            Cli::EventsList(chrono::NaiveDate::from_ymd(2022, 07, 04)),
         )
     }
 

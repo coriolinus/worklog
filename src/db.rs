@@ -93,7 +93,7 @@ impl InsertEvent {
             timestamp,
             message
         )
-        .fetch_one(&mut tx)
+        .fetch_one(&mut *tx)
         .await
         .map(|row| row.id)
         .map_err(Error::InsertEvent)?;
